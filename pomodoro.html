@@ -1,0 +1,1413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🍅 像素番茄钟</title>
+<!--
+  加载 Google Fonts 的像素字体 "Press Start 2P"
+  这是复古游戏风格的经典像素字体，所有文字都会呈现 8-bit 效果
+-->
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+/* =================================================================
+   CSS 变量 — 全局配色方案
+   采用暖色复古像素风调色板，灵感来自 Stardew Valley 等像素游戏
+   所有颜色通过 CSS 变量集中管理，方便后续换肤
+   ================================================================= */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg:       #1a1c2c;  /* 深邃夜空背景色 */
+  --surface:  #2d3047;  /* 卡片/面板表面色，比背景稍亮 */
+  --border:   #5a5d7a;  /* 边框色，像素边框的核心 */
+  --text:     #f4e4c1;  /* 奶油暖白文字色，柔和护眼 */
+  --sub:      #8b8da8;  /* 次要文字色，用于提示和辅助信息 */
+  --red:      #e43b44;  /* 工作模式主题色 — 番茄红 */
+  --green:    #4ec96f;  /* 休息模式主题色 — 清新绿 */
+  --blue:     #3ea4d3;  /* 长休息/继续按钮 — 天空蓝 */
+  --yellow:   #f4b41a;  /* 暂停按钮 — 警示黄 */
+  --shadow:   #0d0e1a;  /* 立体阴影色，几乎纯黑 */
+  --pixel:    2px;       /* 基础像素单位 */
+}
+
+/* =================================================================
+   页面背景
+   使用 repeating-linear-gradient 绘制像素网格纹理
+   两层十字交叉的细线模拟像素游戏的背景网格
+   ================================================================= */
+body {
+  background: var(--bg);
+  color: var(--text);
+  /* 字体优先级：像素字体 → 微软雅黑(中文回退) → 等宽 */
+  font-family: "Press Start 2P", "Microsoft YaHei UI", monospace;
+  display: flex;
+  justify-content: center;   /* 水平居中 */
+  align-items: center;       /* 垂直居中 */
+  min-height: 100vh;         /* 至少占满整个视口高度 */
+  overflow: hidden;          /* 隐藏溢出，防止滚动条 */
+  /* 像素网格背景纹理：
+     - 第一条重复渐变画水平线（每隔 4px 画一条半透明白线）
+     - 第二条重复渐变画垂直线（与水平线交叉形成像素网格） */
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,255,255,0.015) 3px, rgba(255,255,255,0.015) 4px),
+    repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(255,255,255,0.015) 3px, rgba(255,255,255,0.015) 4px);
+}
+
+/* =================================================================
+   主容器 (.app)
+   像素风格卡片 — 核心技法：
+   - 零圆角 (border-radius: 0) 是像素风格的根本
+   - 外层 box-shadow 用实色偏移模拟像素粗边框立体感
+   - 内层 inset box-shadow 添加微妙的凹凸质感
+   ================================================================= */
+.app {
+  background: var(--surface);
+  border: 5px solid var(--border);
+  box-shadow:
+    8px 8px 0 0 var(--shadow),                          /* 右下实色投影 → 立体厚度 */
+    inset 3px 3px 0 0 rgba(255,255,255,0.05),           /* 内左上微亮 → 受光面 */
+    inset -3px -3px 0 0 rgba(0,0,0,0.2);                /* 内右下微暗 → 背光面 */
+  padding: 36px 32px 32px;
+  width: 560px;             /* 固定宽度保证像素布局不崩 */
+  max-width: 96vw;          /* 小屏幕自适应 */
+  position: relative;
+  border-radius: 0;         /* 像素风 = 零圆角 */
+}
+
+/* =================================================================
+   标题栏 — 像素番茄图标 + 标题文字
+   使用 Canvas 绘制的像素番茄图标 (image-rendering: pixelated)
+   配合像素字体的标题
+   ================================================================= */
+.title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.title-bar h1 {
+  font-size: 16px;
+  color: var(--text);
+  letter-spacing: 2px;                                /* 像素字体加字间距更清晰 */
+  text-shadow: 4px 4px 0 var(--shadow);                /* 实色投影 → 像素立体标题 */
+}
+
+/* 像素番茄小图标的容器：保持 pixelated 渲染，禁止浏览器平滑 */
+.pixel-tomato-title {
+  image-rendering: pixelated;                          /* 关键：缩放时保持像素锯齿 */
+  width: 36px;
+  height: 36px;
+}
+
+/* =================================================================
+   模式标签 — 显示当前模式的文字 (专注 / 短休息 / 长休息)
+   颜色随模式动态变化 (JS 设置 style.color)
+   ================================================================= */
+.mode-label {
+  text-align: center;
+  font-size: 11px;
+  margin-bottom: 16px;
+  transition: color 0.2s;                              /* 模式切换时颜色平滑过渡 */
+}
+
+/* =================================================================
+   计时器数字显示区
+   最大的视觉焦点 — 72px 像素字体倒计时数字
+   包含两种动画状态：
+   - .bounce：每秒切换时弹跳
+   - .urgent：最后 10 秒红色闪烁（仅工作模式）
+   ================================================================= */
+.timer-display {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.timer-nums {
+  font-size: 72px;
+  letter-spacing: 8px;                                 /* 大间距让像素数字更清晰 */
+  text-shadow: 5px 5px 0 var(--shadow);                /* 厚实的像素投影 */
+  line-height: 1.2;
+  transition: transform 0.08s;
+}
+
+.timer-nums.bounce {
+  animation: numBounce 0.15s ease;                     /* 数字变化时触发弹跳 */
+}
+
+.timer-nums.urgent {
+  color: var(--red);                                   /* 紧急状态切换为红色 */
+  animation: urgentBlink 0.5s step-end infinite;       /* step-end → 硬切闪烁，不用平滑过渡 */
+}
+
+/* 底部秒数辅助显示 (如 "1500 SEC") */
+.seconds-sub {
+  font-size: 11px;
+  color: var(--sub);
+  margin-top: 4px;
+}
+
+/* =================================================================
+   像素进度条 — 分段像素方块 (RPG 血条风格)
+   由 48 个 18×18 的像素方块水平排列
+   已消耗的时间 → 方块逐个点亮填充
+   使用 CSS transition steps(1) 保证像素感 (无平滑过渡)
+   ================================================================= */
+.progress-section {
+  margin-bottom: 24px;
+}
+
+.progress-blocks {
+  display: flex;
+  gap: 5px;                                            /* 方块之间的像素间距 */
+  justify-content: center;
+  flex-wrap: wrap;                                     /* 宽度不够时自动换行 */
+}
+
+/* 单个像素方块：默认暗色 (未填充状态) */
+.progress-block {
+  width: 18px;
+  height: 18px;
+  background: var(--bg);                               /* 未填充 = 背景色（暗） */
+  border: 2px solid var(--border);
+  border-radius: 0;                                    /* 零圆角 = 像素方形 */
+  /* steps(1) 是关键：颜色在瞬间切换，无渐变过渡 → 保持像素硬朗感 */
+  transition: background 0.12s steps(1), border-color 0.12s steps(1);
+  image-rendering: pixelated;
+}
+
+/* 已填充的方块按模式着色 */
+.progress-block.filled.work  { background: var(--red);   border-color: var(--red);   }
+.progress-block.filled.break { background: var(--green); border-color: var(--green); }
+.progress-block.filled.lbreak { background: var(--blue);  border-color: var(--blue);  }
+
+/* =================================================================
+   番茄计数器 — 4 个像素番茄图标
+   每完成一个工作周期点亮一个
+   新完成的番茄带 .pop 弹出动画
+   未完成的番茄半透明 (.empty)
+   ================================================================= */
+.tomato-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+  min-height: 36px;                                    /* 保证空状态也有占位高度 */
+}
+
+.tomato-icon {
+  image-rendering: pixelated;                          /* Canvas 放大时保持像素锯齿 */
+  transition: transform 0.2s;
+}
+
+/* 番茄完成时的弹出动画：从小放大到正常 */
+.tomato-icon.pop {
+  animation: tomatoPop 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* 未完成的番茄：半透明显示 */
+.tomato-icon.empty {
+  opacity: 0.25;
+}
+
+/* =================================================================
+   控制按钮 — 主按钮 + 重置 + 跳过
+   像素按钮核心技法：
+   - box-shadow 偏移 5px 实色 (不是模糊阴影) → 立体厚度
+   - :active 时 translate + 缩小 box-shadow → 按下效果
+   - 零圆角 → 方块感
+   ================================================================= */
+.btn-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+/* 按钮基础样式 */
+.btn {
+  font-family: "Press Start 2P", "Microsoft YaHei UI", monospace;
+  font-size: 12px;
+  padding: 12px 20px;
+  border: 3px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 0;                                    /* 无圆角 */
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: 5px 5px 0 0 var(--shadow);               /* 实色投影 → 立体按键 */
+  transition: transform 0.05s, box-shadow 0.05s, background 0.1s, border-color 0.1s;
+  position: relative;
+}
+
+.btn:hover { background: #3a3d58; }                    /* hover 时微亮 */
+
+/* 按下效果：整体向右下位移，投影缩小 → 看起来像真的被按下去了 */
+.btn:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0 0 var(--shadow);
+}
+
+/* 主按钮 — 更大更醒目，颜色随状态变化 */
+.btn-main {
+  flex: 1.5;                                           /* 比其他按钮宽 1.5 倍 */
+  font-size: 14px;
+  border-width: 3px;
+  letter-spacing: 2px;
+}
+
+/* 主按钮 — 工作/开始状态：红色 */
+.btn-main.work {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+  box-shadow: 5px 5px 0 0 #8b1a20;                    /* 比按钮更暗的红色投影 */
+}
+.btn-main.work:hover { background: #f04c53; }
+.btn-main.work:active { box-shadow: 1px 1px 0 0 #8b1a20; }
+
+/* 主按钮 — 暂停状态：黄色 */
+.btn-main.pause {
+  border-color: var(--yellow);
+  background: var(--yellow);
+  color: #1a1c2c;
+  box-shadow: 5px 5px 0 0 #8b6a0a;
+}
+.btn-main.pause:hover { background: #f7c940; }
+.btn-main.pause:active { box-shadow: 1px 1px 0 0 #8b6a0a; }
+
+/* 主按钮 — 继续/长休息状态：蓝色 */
+.btn-main.resume {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #fff;
+  box-shadow: 5px 5px 0 0 #1a5a7a;
+}
+.btn-main.resume:hover { background: #56b8e5; }
+.btn-main.resume:active { box-shadow: 1px 1px 0 0 #1a5a7a; }
+
+/* 次要按钮 — 重置 / 跳过 */
+.btn-secondary {
+  flex: 0.6;
+  font-size: 10px;
+  padding: 12px 10px;
+}
+
+.btn-secondary:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0 0 var(--shadow);
+}
+
+/* =================================================================
+   模式切换按钮 — 🍅 工作 / ☕ 短休息 / 🌴 长休息
+   64×64 大方块，选中的模式高亮 + 发光
+   ================================================================= */
+.mode-row {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.mode-btn {
+  font-family: "Press Start 2P", monospace;
+  font-size: 22px;
+  width: 64px;
+  height: 64px;
+  border: 3px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 4px 4px 0 0 var(--shadow);
+  transition: transform 0.05s, box-shadow 0.05s, background 0.15s, border-color 0.15s;
+  image-rendering: pixelated;
+}
+
+.mode-btn:hover { background: #3a3d58; }
+.mode-btn:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0 0 var(--shadow);
+}
+
+/* 激活状态的模式按钮：白色边框 + 对应主题色背景 + 微光 */
+.mode-btn.active {
+  border-color: #fff;
+  color: #fff;
+  box-shadow: 4px 4px 0 0 var(--shadow), 0 0 16px rgba(255,255,255,0.15);
+}
+
+.mode-btn.active.work  { background: var(--red);   border-color: var(--red);   }
+.mode-btn.active.break { background: var(--green); border-color: var(--green); }
+.mode-btn.active.lbreak { background: var(--blue);  border-color: var(--blue);  }
+
+/* =================================================================
+   设置面板 — 齿轮按钮 + 折叠面板
+   可调整三种时长，值保存到 localStorage
+   ================================================================= */
+/* 齿轮按钮 */
+.settings-toggle {
+  display: block;
+  margin: 0 auto;
+  background: none;
+  border: none;
+  color: var(--sub);
+  font-family: "Press Start 2P", monospace;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 6px;
+  transition: color 0.15s, transform 0.3s;
+}
+.settings-toggle:hover { color: var(--text); }
+
+/* 面板打开时齿轮旋转 60 度 */
+.settings-toggle.open { transform: rotate(60deg); }
+
+/* 设置面板 — 默认隐藏，点击齿轮展开 */
+.settings-panel {
+  margin-top: 16px;
+  padding: 20px;
+  border: 3px solid var(--border);
+  background: var(--bg);
+  display: none;                                       /* 默认隐藏 */
+  border-radius: 0;
+}
+
+.settings-panel.visible { display: block; }            /* JS 添加 .visible 展开 */
+
+.setting-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.setting-item:last-child { margin-bottom: 0; }
+
+.setting-item label {
+  font-size: 10px;
+  color: var(--sub);
+}
+
+/* 设置输入框 — 像素风格数字输入 */
+.setting-item input {
+  font-family: "Press Start 2P", monospace;
+  font-size: 11px;
+  width: 72px;
+  padding: 8px;
+  text-align: center;
+  background: var(--surface);
+  color: var(--text);
+  border: 2px solid var(--border);
+  border-radius: 0;
+  outline: none;
+}
+.setting-item input:focus {
+  border-color: var(--yellow);                         /* 聚焦时黄色边框高亮 */
+}
+
+/* =================================================================
+   底部提示文字 + 快捷键提示
+   ================================================================= */
+.hint {
+  text-align: center;
+  font-size: 9px;
+  color: var(--sub);
+  margin-top: 18px;
+  min-height: 1.2em;                                   /* 保持高度防止文字切换时跳动 */
+  letter-spacing: 1px;
+  transition: color 0.2s;
+}
+
+.key-hints {
+  text-align: center;
+  font-size: 8px;
+  color: var(--border);                                /* 用边框色淡化，弱于提示文字 */
+  margin-top: 12px;
+  letter-spacing: 0.5px;
+  line-height: 2;
+}
+
+/* =================================================================
+   CSS 动画关键帧定义
+   所有动画都在此处集中定义，由 JS 动态添加 class 触发
+   ================================================================= */
+
+/* 数字弹跳：秒数切换时轻微放大再缩回 */
+@keyframes numBounce {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.08); }                     /* 峰值放大 8% */
+  100% { transform: scale(1); }
+}
+
+/* 紧急闪烁：最后 10 秒数字红闪
+   step-end 让闪烁在 50% 处硬切，不使用平滑过渡 → 像素断续感 */
+@keyframes urgentBlink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+
+/* 番茄弹出：新完成番茄的弹性缩放动画
+   cubic-bezier 贝塞尔曲线 → 先超过目标再回弹 (类似弹簧效果) */
+@keyframes tomatoPop {
+  0%   { transform: scale(0); }
+  60%  { transform: scale(1.3); }                      /* 过冲 → 弹性感 */
+  100% { transform: scale(1); }
+}
+
+/* 画面震动：倒计时结束时触发，模拟像素游戏中的受击反馈 */
+.shake {
+  animation: shake 0.35s ease;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  15%      { transform: translateX(-6px) translateY(2px); }
+  30%      { transform: translateX(6px) translateY(-2px); }
+  45%      { transform: translateX(-4px) translateY(1px); }
+  60%      { transform: translateX(4px); }
+  75%      { transform: translateX(-2px); }
+  90%      { transform: translateX(2px); }
+}
+
+/* 背景闪烁（备用，用于模式切换时） */
+.flash-bg {
+  animation: flashBg 0.4s ease;
+}
+
+@keyframes flashBg {
+  0%, 100% { background: var(--surface); }
+  50%      { background: #3d405a; }
+}
+
+/* 自定义滚动条 — 也做成像素风格 */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 0; }
+</style>
+</head>
+<body>
+
+<!-- ========== HTML 结构 ==========
+  整个应用是一个单页面卡片，从上到下依次为：
+  1. 标题栏 (像素番茄图标 + 标题)
+  2. 模式标签 (显示当前是专注/短休息/长休息)
+  3. 计时器 (大数字倒计时 + 秒数辅助)
+  4. 进度条 (48 个像素方块)
+  5. 番茄计数 (4 个像素番茄图标)
+  6. 控制按钮 (开始/暂停 + 重置 + 跳过)
+  7. 模式切换 (🍅 工作 / ☕ 短休 / 🌴 长休)
+  8. 设置面板 (调整三种时长)
+  9. 提示文字 + 快捷键说明
+  -->
+
+<div class="app" id="app">
+  <!-- 标题栏 -->
+  <div class="title-bar">
+    <!-- Canvas 像素番茄图标: 12×12 像素格，JS 手动绘制每格颜色 -->
+    <canvas class="pixel-tomato-title" id="titleTomato" width="12" height="12"></canvas>
+    <h1>像素番茄钟</h1>
+  </div>
+
+  <!-- 模式标签：显示 "专注" / "短休息" / "长休息" -->
+  <div class="mode-label" id="modeLabel">专注</div>
+
+  <!-- 计时器区域 -->
+  <div class="timer-display">
+    <div class="timer-nums" id="timerNums">25:00</div>
+    <div class="seconds-sub" id="secondsSub">1500 SEC</div>
+  </div>
+
+  <!-- 像素进度条：48 个方块由 JS 动态生成 -->
+  <div class="progress-section">
+    <div class="progress-blocks" id="progressBlocks"></div>
+  </div>
+
+  <!-- 番茄计数器：最多显示 4 个像素番茄，满了切长休息 -->
+  <div class="tomato-row" id="tomatoRow"></div>
+
+  <!-- 控制按钮行 -->
+  <div class="btn-row">
+    <button class="btn btn-main work" id="btnMain">▶  开始</button>
+    <button class="btn btn-secondary" id="btnReset">↺ 重置</button>
+    <button class="btn btn-secondary" id="btnSkip">⏭ 跳过</button>
+  </div>
+
+  <!-- 模式切换按钮 -->
+  <div class="mode-row">
+    <button class="mode-btn active work" id="btnWork" title="工作">🍅</button>
+    <button class="mode-btn" id="btnShort" title="短休息">☕</button>
+    <button class="mode-btn" id="btnLong" title="长休息">🌴</button>
+  </div>
+
+  <!-- 设置：齿轮按钮 + 可折叠面板 -->
+  <button class="settings-toggle" id="settingsToggle" title="设置">⚙</button>
+  <div class="settings-panel" id="settingsPanel">
+    <div class="setting-item">
+      <label>工作 (分钟)</label>
+      <input type="number" id="workMinutes" min="1" max="120" value="25">
+    </div>
+    <div class="setting-item">
+      <label>短休息 (分钟)</label>
+      <input type="number" id="shortBreakMinutes" min="1" max="30" value="5">
+    </div>
+    <div class="setting-item">
+      <label>长休息 (分钟)</label>
+      <input type="number" id="longBreakMinutes" min="1" max="60" value="15">
+    </div>
+  </div>
+
+  <!-- 底部状态提示 -->
+  <div class="hint" id="hint">选好模式，点击开始吧！</div>
+
+  <!-- 快捷键说明 -->
+  <div class="key-hints">
+    [SPACE] 开始/暂停  [R] 重置  [→] 跳过
+  </div>
+</div>
+
+<script>
+// ====================================================================
+//  像素番茄钟 — JavaScript 主逻辑
+//  架构概述：
+//  ┌─────────────────────────────────────────────┐
+//  │  drawPixelTomato()  像素番茄绘制 (Canvas)    │
+//  │  playBeep()         8-bit 音效 (Web Audio)  │
+//  │  playFinishJingle() 完成提示音乐             │
+//  │  playTick()         点击音效                 │
+//  ├─────────────────────────────────────────────┤
+//  │  class PomodoroApp  主应用类                 │
+//  │    ├─ 状态管理 (mode / state / remaining)   │
+//  │    ├─ 设置持久化 (localStorage)             │
+//  │    ├─ 渲染管线 (_render → 6个子渲染)         │
+//  │    ├─ 定时器循环 (setInterval 1000ms)        │
+//  │    ├─ 用户操作 (开始/暂停/重置/跳过/切换)     │
+//  │    └─ 事件绑定 (按钮 + 键盘快捷键)           │
+//  └─────────────────────────────────────────────┘
+// ====================================================================
+
+// 快捷选择器：减少 document.querySelector 的重复书写
+const $ = (sel) => document.querySelector(sel);
+
+// ====================================================================
+//  像素番茄绘制函数
+//  在 12×12 像素的画布上手工指定每个像素格的颜色
+//  通过 CSS image-rendering: pixelated 保持缩放后的锯齿感
+//
+//  像素格坐标系 (x, y)：
+//  (0,0) 左上角 → (11,0) 右上角 → (0,11) 左下角 → (11,11) 右下角
+//
+//  颜色编号：
+//  1 = 深红轮廓 (c8373e)  — 番茄身体的外边框
+//  2 = 红色填充 (e43b44)  — 番茄主体
+//  3 = 浅红高光 (f89ca3)  — 光泽感点缀
+//  4 = 绿色      (4ec96f) — 叶子
+//  5 = 深绿      (2d8a45) — 茎
+// ====================================================================
+function drawPixelTomato(canvas, scale = 1) {
+  const w = 12, h = 12;                                // 原始像素画布 12×12
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;                   // 关键：关闭平滑 → 像素锯齿
+
+  // 像素数据数组：[x坐标, y坐标, 颜色编号]
+  // y=0 是最顶部，y=11 是最底部
+  const pixels = [
+    // ── 绿叶茎 (y=0 ~ y=1，顶部) ──
+    [4,0,5],[5,0,5],[6,0,5],[7,0,5],                  // 茎：顶部深绿横条
+    [3,1,4],[4,1,5],[5,1,1],[6,1,1],[7,1,5],[8,1,4],  // 叶子向两侧展开，中间连接番茄身体
+
+    // ── 番茄身体上层 (y=2 ~ y=3) 开始出现红色填充 ──
+    [2,2,1],[3,2,2],[4,2,2],[5,2,2],[6,2,2],[7,2,2],[8,2,2],[9,2,1],
+    [2,3,1],[3,3,2],[4,3,3],[5,3,2],[6,3,2],[7,3,3],[8,3,2],[9,3,1], // 高光点(3)出现
+
+    // ── 番茄身体中层 (y=4 ~ y=7) 最宽的部分 ──
+    [1,4,1],[2,4,2],[3,4,2],[4,4,3],[5,4,2],[6,4,3],[7,4,2],[8,4,2],[9,4,2],[10,4,1],
+    [1,5,1],[2,5,2],[3,5,2],[4,5,2],[5,5,3],[6,5,2],[7,5,3],[8,5,2],[9,5,2],[10,5,1],
+    [1,6,1],[2,6,2],[3,6,3],[4,6,2],[5,6,2],[6,6,3],[7,6,2],[8,6,3],[9,6,2],[10,6,1],
+    [1,7,1],[2,7,2],[3,7,2],[4,7,3],[5,7,2],[6,7,3],[7,7,2],[8,7,2],[9,7,2],[10,7,1],
+
+    // ── 番茄身体下层 (y=8 ~ y=10) 逐渐收窄 ──
+    [2,8,1],[3,8,2],[4,8,2],[5,8,2],[6,8,2],[7,8,2],[8,8,2],[9,8,1],
+    [2,9,1],[3,9,2],[4,9,2],[5,9,2],[6,9,2],[7,9,2],[8,9,2],[9,9,1],
+    [3,10,1],[4,10,2],[5,10,2],[6,10,2],[7,10,2],[8,10,1],
+
+    // ── 底部弧线 (y=11) 番茄底部收口 ──
+    [4,11,1],[5,11,1],[6,11,1],[7,11,1],
+  ];
+
+  // 颜色调色板
+  const palette = {
+    1: "#c8373e",  // 深红 — 轮廓
+    2: "#e43b44",  // 正红 — 填充
+    3: "#f89ca3",  // 浅红 — 高光
+    4: "#4ec96f",  // 绿色 — 叶子
+    5: "#2d8a45",  // 深绿 — 茎
+  };
+
+  // 清除画布
+  ctx.clearRect(0, 0, w, h);
+
+  // 逐个像素填充：fillRect(x, y, 1, 1) 每次只画 1 像素
+  for (const [x, y, c] of pixels) {
+    ctx.fillStyle = palette[c];
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  // 放大显示：不改变内部画布分辨率，仅通过 CSS 尺寸放大
+  // 这样配合 image-rendering: pixelated 就能得到清晰的像素放大效果
+  canvas.style.width = (w * scale) + "px";
+  canvas.style.height = (h * scale) + "px";
+}
+
+// ====================================================================
+//  8-bit 音效系统 — 使用 Web Audio API
+//
+//  OscillatorNode (振荡器) 生成原始波形
+//  type: "square" → 方波 → 最接近 8-bit 游戏机的音色
+//  GainNode (增益) 控制音量，通过指数衰减实现短促的哔哔声
+// ====================================================================
+
+/**
+ * 播放一个短促的 8-bit 哔哔声
+ * @param {number} freq     - 频率 (Hz)，880=高音哔，440=中音嘀
+ * @param {number} duration - 持续时间 (秒)
+ * @param {string} type     - 波形类型："square"(方波)/"sine"(正弦)/"triangle"(三角)/"sawtooth"(锯齿)
+ */
+function playBeep(freq = 880, duration = 0.08, type = "square") {
+  try {
+    // 创建音频上下文 (每次新建，因为用完即弃)
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ac.createOscillator();                 // 振荡器 → 产生声音
+    const gain = ac.createGain();                      // 增益节点 → 控制音量
+
+    osc.type = type;                                   // 方波 = 最像素的波形
+    osc.frequency.setValueAtTime(freq, ac.currentTime);// 设置频率
+
+    gain.gain.setValueAtTime(0.08, ac.currentTime);    // 初始音量 8%
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration); // 指数衰减到近乎无声
+
+    // 连接：振荡器 → 增益 → 扬声器
+    osc.connect(gain);
+    gain.connect(ac.destination);
+
+    // 定时播放
+    osc.start(ac.currentTime);
+    osc.stop(ac.currentTime + duration);
+  } catch (e) {
+    // 浏览器可能阻止自动播放音频，静默失败不影响功能
+  }
+}
+
+/**
+ * 完成提示音乐 — 4 个递增音符的 8-bit 小旋律
+ * C5(523Hz) → E5(659Hz) → G5(784Hz) → C6(1047Hz)
+ * 每个音符间隔 120ms，形成上行琶音效果
+ */
+function playFinishJingle() {
+  const notes = [523, 659, 784, 1047];                 // C5, E5, G5, C6 上行和弦
+  notes.forEach((freq, i) => {
+    setTimeout(() => playBeep(freq, 0.12, "square"), i * 120);
+  });
+}
+
+/**
+ * 按钮点击音效 — 短促的低频嘀声
+ */
+function playTick() {
+  playBeep(440, 0.03, "square");                       // 440Hz ≈ A4，短促 30ms
+}
+
+// ====================================================================
+//  PomodoroApp 类 — 应用主控制器
+//
+//  状态模型：
+//  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+//  │    IDLE      │───▶│   RUNNING    │───▶│   PAUSED     │
+//  │  空闲/初始   │    │   运行中      │    │   已暂停      │
+//  └──────────────┘    └──────────────┘    └──────────────┘
+//         ▲                   │                    │
+//         │ reset/switch       │ pause              │ resume
+//         └───────────────────┘                    │
+//                                                   │
+//  模式循环：                                          │
+//  work ──(完成)──▶ short_break ──(完成)──▶ work     │
+//    │                                         │      │
+//    └──(第4个完成)──▶ long_break ──(完成)──▶ work   │
+//
+//  渲染管线：
+//  _render() 统一调度 6 个子渲染方法，任何状态变化后调用一次
+//  - _renderTimer()        更新倒计时数字
+//  - _renderProgress()     更新像素进度条
+//  - _renderTomatoes()     更新番茄计数图标
+//  - _renderModeLabel()    更新模式标签颜色
+//  - _renderModeButtons()  更新模式按钮高亮
+//  - _renderMainButton()   更新主按钮文字和颜色
+// ====================================================================
+class PomodoroApp {
+  constructor() {
+    // ── 核心状态 ──
+    this.mode = "work";                                // 当前模式: "work" | "short_break" | "long_break"
+    this.state = "idle";                               // 计时器状态: "idle" | "running" | "paused"
+    this.pomodoros = 0;                                // 已完成的番茄总数（跨会话累积，不重置）
+    this._prevPomodoros = -1;                          // 上次渲染时的番茄数（-1 确保首次必定渲染）
+    this.remaining = 0;                                // 当前剩余秒数
+    this.total = 0;                                    // 当前阶段总秒数（用于计算进度百分比）
+    this._interval = null;                             // setInterval 句柄（null = 定时器未启动）
+    this._totalBlocks = 48;                            // 进度条像素方块总数
+
+    // ── 初始化流程 ──
+    this.settings = this._loadSettings();              // 1. 从 localStorage 加载设置
+    this._setTime();                                   // 2. 根据模式和设置计算 remaining/total
+    this._drawTitleTomato();                           // 3. 绘制标题栏的像素番茄
+    this._buildProgressBlocks();                       // 4. 动态生成 48 个进度条方块
+    this._render();                                    // 5. 首次渲染整个界面
+    this._bindEvents();                                // 6. 绑定所有按钮和键盘事件
+  }
+
+  // ================================================================
+  //  设置持久化 — localStorage
+  //  键名: "pixel-pomodoro-settings"
+  //  存储格式: JSON { work: 25, shortBreak: 5, longBreak: 15 }
+  // ================================================================
+
+  /**
+   * 从 localStorage 加载用户设置
+   * 如果读取失败或数据不存在，返回默认值（25/5/15 分钟）
+   */
+  _loadSettings() {
+    try {
+      const raw = localStorage.getItem("pixel-pomodoro-settings");
+      if (raw) {
+        const s = JSON.parse(raw);
+        return {
+          work: s.work || 25,
+          shortBreak: s.shortBreak || 5,
+          longBreak: s.longBreak || 15,
+        };
+      }
+    } catch (e) { /* 数据损坏或隐私模式下不可用，忽略异常 */ }
+    return { work: 25, shortBreak: 5, longBreak: 15 };
+  }
+
+  /**
+   * 将当前设置保存到 localStorage
+   */
+  _saveSettings() {
+    try {
+      localStorage.setItem("pixel-pomodoro-settings", JSON.stringify(this.settings));
+    } catch (e) { /* 隐私模式或存储满，忽略 */ }
+  }
+
+  // ================================================================
+  //  时间计算
+  //  根据当前模式和用户设置，计算 remaining（剩余秒数）和 total（总秒数）
+  //  分钟数 × 60 = 秒数
+  // ================================================================
+
+  _setTime() {
+    const times = {
+      work:        this.settings.work * 60,             // 工作：默认 25 × 60 = 1500 秒
+      short_break: this.settings.shortBreak * 60,       // 短休息：默认 5 × 60 = 300 秒
+      long_break:  this.settings.longBreak * 60,        // 长休息：默认 15 × 60 = 900 秒
+    };
+    this.remaining = times[this.mode];
+    this.total = times[this.mode];
+  }
+
+  // ================================================================
+  //  标题番茄绘制 — 仅在初始化时调用一次
+  // ================================================================
+
+  _drawTitleTomato() {
+    drawPixelTomato($("#titleTomato"), 3);             // 12×12 放大 3 倍 = 36px 显示
+  }
+
+  // ================================================================
+  //  进度条方块生成
+  //  动态创建 48 个 .progress-block div 元素
+  //  每个方块通过 data-index 属性标记序号
+  // ================================================================
+
+  _buildProgressBlocks() {
+    const container = $("#progressBlocks");
+    container.innerHTML = "";
+    for (let i = 0; i < this._totalBlocks; i++) {
+      const block = document.createElement("div");
+      block.className = "progress-block";              // 默认暗色（未填充）
+      block.dataset.index = i;                         // 标记索引，方便调试
+      container.appendChild(block);
+    }
+  }
+
+  // ================================================================
+  //  渲染管线 — 统一入口
+  //  任何状态变化后调用一次，同步更新所有 UI 元素
+  //  6 个子渲染方法各司其职，互不干扰
+  // ================================================================
+
+  _render() {
+    this._renderTimer();                               // 更新倒计时数字
+    this._renderProgress();                            // 更新像素进度条
+    this._renderTomatoes();                            // 更新番茄计数图标
+    this._renderModeLabel();                           // 更新模式标签
+    this._renderModeButtons();                         // 更新模式按钮高亮
+    this._renderMainButton();                          // 更新主按钮文字和颜色
+  }
+
+  /**
+   * 渲染倒计时数字
+   * - 将秒数转换为 MM:SS 格式
+   * - 只有文字变化时才触发弹跳动画（避免每秒无意义重绘）
+   * - 工作模式最后 10 秒触发红色闪烁警告
+   */
+  _renderTimer() {
+    const mins = Math.floor(this.remaining / 60);      // 剩余分钟数
+    const secs = this.remaining % 60;                   // 剩余秒数（0-59）
+    const nums = $("#timerNums");
+
+    // 格式化为 "25:00" 样式（不足两位补零）
+    const newText = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+
+    // 只有文字确实变化了才更新（避免每秒触发不必要的 DOM 操作和动画）
+    if (nums.textContent !== newText) {
+      nums.textContent = newText;
+
+      // 触发弹跳动画：先移除再添加 class → 强制重新触发 CSS 动画
+      nums.classList.remove("bounce");
+      void nums.offsetWidth;                           // 强制浏览器回流（reflow）→ 重置动画状态
+      nums.classList.add("bounce");
+
+      // 紧急状态判断：工作模式 + 运行中 + 剩余 ≤ 10 秒 → 红色闪烁
+      if (this.state === "running" && this.remaining <= 10 && this.mode === "work") {
+        nums.classList.add("urgent");
+      } else {
+        nums.classList.remove("urgent");
+      }
+    }
+
+    // 更新底部秒数辅助显示（如 "1500 SEC"）
+    $("#secondsSub").textContent = `${this.remaining} SEC`;
+  }
+
+  /**
+   * 渲染像素进度条
+   * 计算消耗时间的百分比 → 对应点亮前 N 个像素方块
+   * 不同模式使用不同颜色：红(工作) / 绿(短休) / 蓝(长休)
+   */
+  _renderProgress() {
+    const blocks = document.querySelectorAll(".progress-block");
+    if (this.total <= 0) return;                       // 防御：避免除零
+
+    // 计算已消耗时间的百分比
+    // 例如：total=1500, remaining=750 → pct = (1500-750)/1500 = 0.5
+    const pct = (this.total - this.remaining) / this.total;
+
+    // 按百分比计算应该点亮多少个方块
+    // 例如：0.5 × 48 = 24 个方块
+    const filledCount = Math.floor(pct * this._totalBlocks);
+
+    // 确定当前模式对应的 CSS class
+    let modeClass = "work";
+    if (this.mode === "short_break") modeClass = "break";
+    if (this.mode === "long_break")  modeClass = "lbreak";
+
+    // 逐个方块设置状态
+    blocks.forEach((block, i) => {
+      if (i < filledCount) {
+        // 前 filledCount 个方块 → 点亮填充
+        block.classList.add("filled", modeClass);
+      } else {
+        // 其余方块 → 恢复默认暗色
+        block.classList.remove("filled", "work", "break", "lbreak");
+      }
+    });
+  }
+
+  /**
+   * 渲染番茄计数图标
+   * 显示 4 个像素番茄，已完成的显示实色，未完成的半透明
+   *
+   * 性能优化：只在 pomodoros 数值变化时才重建 Canvas
+   * （因为 _render() 每秒调用一次，但番茄数只在完成任务时才变）
+   *
+   * 动画优化：只有最新完成的那个番茄才播放 .pop 弹出动画
+   */
+  _renderTomatoes() {
+    const full = this.pomodoros % 4;                   // 当前周期内的番茄数 (0~3)
+
+    // 如果番茄数没变化，跳过重建（避免每秒重绘浪费性能）
+    if (full === this._prevPomodoros % 4 && this._prevPomodoros === this.pomodoros) return;
+    this._prevPomodoros = this.pomodoros;
+
+    const row = $("#tomatoRow");
+    row.innerHTML = "";                                // 清空旧的 Canvas
+
+    // 创建 4 个番茄图标
+    for (let i = 0; i < 4; i++) {
+      const canvas = document.createElement("canvas");
+      canvas.className = "tomato-icon";
+
+      if (i < full) {
+        // 已完成的番茄
+        if (i === full - 1) {
+          canvas.classList.add("pop");                 // 只有最后一个（最新完成的）弹跳
+        }
+      } else {
+        canvas.classList.add("empty");                 // 未完成的半透明
+      }
+
+      drawPixelTomato(canvas, 3);                      // 12×12 放大 3 倍
+      row.appendChild(canvas);
+    }
+  }
+
+  /**
+   * 渲染模式标签 — "专注" / "短休息" / "长休息"
+   * 颜色随模式切换：红 / 绿 / 蓝
+   */
+  _renderModeLabel() {
+    const names = {
+      work: "— 专注 —",
+      short_break: "— 短休息 —",
+      long_break: "— 长休息 —"
+    };
+    const colors = {
+      work: "var(--red)",
+      short_break: "var(--green)",
+      long_break: "var(--blue)"
+    };
+    const label = $("#modeLabel");
+    label.textContent = names[this.mode];
+    label.style.color = colors[this.mode];
+  }
+
+  /**
+   * 渲染模式切换按钮高亮
+   * 当前选中的模式按钮添加 .active + 对应颜色 class
+   * 其余按钮恢复默认样式
+   */
+  _renderModeButtons() {
+    const map = [
+      ["btnWork", "work"],
+      ["btnShort", "short_break"],
+      ["btnLong", "long_break"],
+    ];
+    const modeClassMap = { work: "work", short_break: "break", long_break: "lbreak" };
+
+    for (const [id, mode] of map) {
+      const btn = $(`#${id}`);
+      // 先移除所有状态类
+      btn.classList.remove("active", "work", "break", "lbreak");
+      // 当前模式才添加高亮
+      if (mode === this.mode) {
+        btn.classList.add("active", modeClassMap[mode]);
+      }
+    }
+  }
+
+  /**
+   * 渲染主按钮
+   * 根据 state (idle/running/paused) 和 mode (work/break) 组合决定：
+   * - 按钮文字：开始 / 暂停 / 继续 / 休息
+   * - 按钮颜色：红(工作) / 黄(暂停) / 蓝(继续/休息)
+   */
+  _renderMainButton() {
+    const btn = $("#btnMain");
+    btn.classList.remove("work", "pause", "resume");   // 清除之前的状态类
+
+    if (this.state === "idle") {
+      // 空闲状态 → 显示 "开始" 按钮
+      const cls = this.mode === "work" ? "work"
+                : this.mode === "short_break" ? "pause"  // 短休息用黄色（复用 pause 的黄）
+                : "resume";                               // 长休息用蓝色
+      btn.classList.add(cls);
+      btn.textContent = this.mode === "work" ? "▶  开始" : "▶  休息";
+    } else if (this.state === "running") {
+      // 运行中 → 显示 "暂停"
+      btn.classList.add("pause");
+      btn.textContent = "⏸  暂停";
+    } else if (this.state === "paused") {
+      // 已暂停 → 显示 "继续"
+      btn.classList.add("resume");
+      btn.textContent = "▶  继续";
+    }
+  }
+
+  // ================================================================
+  //  定时器核心逻辑
+  //  使用 setInterval 每 1000ms 执行一次倒计时
+  //  每次 tick：remaining -= 1 → 重新渲染 → 检查是否倒计时结束
+  // ================================================================
+
+  /**
+   * 启动定时器
+   * 防止重复启动：如果已有定时器在运行则直接返回
+   * 每秒递减 remaining，减到 0 时触发 _finish()
+   */
+  _startTimer() {
+    if (this._interval) return;                        // 已有定时器 → 不重复创建
+
+    this._interval = setInterval(() => {
+      // 暂停状态跳过倒计时，但不停止定时器（保持轮询）
+      if (this.state !== "running") return;
+
+      this.remaining--;                                // 倒计时递减 1 秒
+      this._render();                                  // 更新界面
+
+      if (this.remaining <= 0) {
+        this._finish();                                // 时间到 → 进入完成流程
+      }
+    }, 1000);
+  }
+
+  /**
+   * 停止定时器
+   * 清除 setInterval 并将句柄置 null
+   */
+  _stopTimer() {
+    if (this._interval) {
+      clearInterval(this._interval);
+      this._interval = null;
+    }
+  }
+
+  /**
+   * 倒计时完成处理
+   * 流程：
+   * 1. 停止定时器
+   * 2. 画面震动动画
+   * 3. 播放 8-bit 完成音乐
+   * 4. 发送浏览器桌面通知
+   * 5. 根据模式自动切换下一阶段
+   *    - 工作完成 → pomodoros++，判断是否该长休息
+   *    - 休息完成 → 切回工作模式
+   */
+  _finish() {
+    this._stopTimer();
+    this.state = "idle";
+
+    // 画面震动：给主容器加 .shake 类，CSS 动画 0.35s 后自动结束
+    const app = $("#app");
+    app.classList.add("shake");
+    setTimeout(() => app.classList.remove("shake"), 400);
+
+    // 完成提示音：4 个递增音符
+    playFinishJingle();
+
+    // 浏览器桌面通知
+    this._notify();
+
+    // 判断下一步模式
+    if (this.mode === "work") {
+      // 刚完成一个工作周期
+      this.pomodoros++;                                // 番茄计数 +1
+
+      if (this.pomodoros % 4 === 0) {
+        // 每 4 个番茄 → 触发长休息
+        this._switchMode("long_break");
+        $("#hint").textContent = `🎉 完成 ${this.pomodoros} 个番茄！好好休息吧～`;
+      } else {
+        // 否则 → 短休息
+        this._switchMode("short_break");
+        $("#hint").textContent = `🎉 完成 ${this.pomodoros} 个番茄！休息一下～`;
+      }
+    } else {
+      // 休息结束 → 回到工作模式
+      this._switchMode("work");
+      $("#hint").textContent = "休息结束，开始新的番茄吧！";
+    }
+
+    this._render();
+  }
+
+  /**
+   * 发送浏览器桌面通知
+   * 需要用户授权；如果之前未授权，则请求授权（不强制弹出）
+   */
+  _notify() {
+    if (!("Notification" in window)) return;           // 浏览器不支持通知 API
+
+    if (Notification.permission === "granted") {
+      const msgs = {
+        work: "🎉 番茄完成！休息一下吧～",
+        short_break: "☕ 短休息结束，继续加油！",
+        long_break: "🌴 长休息结束，元气满满！",
+      };
+      new Notification("像素番茄钟", {
+        body: msgs[this.mode] || "时间到！",
+      });
+    } else if (Notification.permission !== "denied") {
+      // 用户还没选过 "允许/拒绝" → 请求授权（但不强迫）
+      Notification.requestPermission();
+    }
+  }
+
+  // ================================================================
+  //  用户操作 — 对外暴露的方法
+  //  每个方法修改状态后都调用 _render() 刷新界面
+  // ================================================================
+
+  /**
+   * 开始计时
+   * 只在 IDLE 状态下有效
+   */
+  start() {
+    if (this.state === "idle") {
+      this.state = "running";
+      // 根据模式显示不同的状态提示
+      if (this.mode === "work") {
+        $("#hint").textContent = "专注中，别分心！";
+      } else if (this.mode === "short_break") {
+        $("#hint").textContent = "小小休息一下～";
+      } else {
+        $("#hint").textContent = "好好休息，放松身心～";
+      }
+      this._startTimer();                              // 启动 setInterval
+      this._render();
+    }
+  }
+
+  /**
+   * 暂停计时
+   * 只在 RUNNING 状态下有效
+   * 不停止 setInterval，只是 state 改为 paused → 循环内跳过递减
+   */
+  pause() {
+    if (this.state === "running") {
+      this.state = "paused";
+      $("#hint").textContent = "⏸ 已暂停";
+      this._render();
+    }
+  }
+
+  /**
+   * 继续计时
+   * 只在 PAUSED 状态下有效
+   */
+  resume() {
+    if (this.state === "paused") {
+      this.state = "running";
+      if (this.mode === "work") {
+        $("#hint").textContent = "继续专注！";
+      } else {
+        $("#hint").textContent = "继续休息～";
+      }
+      this._render();
+    }
+  }
+
+  /**
+   * 切换：开始 ↔ 暂停 ↔ 继续
+   * 根据当前状态自动判断下一步动作
+   * 这是主按钮的点击处理函数
+   */
+  toggle() {
+    if (this.state === "idle")    this.start();
+    else if (this.state === "running") this.pause();
+    else if (this.state === "paused")  this.resume();
+  }
+
+  /**
+   * 重置：停止定时器，时间恢复到当前阶段初始值
+   */
+  reset() {
+    this._stopTimer();
+    this.state = "idle";
+    this._setTime();                                   // 重新计算 remaining = total
+    $("#hint").textContent = "↺ 已重置";
+    this._render();
+  }
+
+  /**
+   * 跳过：立即结束当前阶段，触发完成流程
+   */
+  skip() {
+    this._stopTimer();
+    this.state = "idle";
+    this.remaining = 0;                                // 强制归零
+    this._render();
+    this._finish();                                    // 直接进入完成处理
+  }
+
+  /**
+   * 内部模式切换（被 _finish 调用）
+   * 停止定时器，切换模式，重置时间
+   */
+  _switchMode(mode) {
+    this._stopTimer();
+    this.state = "idle";
+    this.mode = mode;
+    this._setTime();
+    this._render();
+  }
+
+  /**
+   * 手动模式切换（用户点击模式按钮）
+   * 如果已经是当前模式且空闲状态，不做任何事（防止重复点击）
+   */
+  switchMode(mode) {
+    if (this.mode === mode && this.state === "idle") return;
+    this._switchMode(mode);
+    const hints = {
+      work: "准备开始专注！",
+      short_break: "准备休息一下～",
+      long_break: "准备好好休息～",
+    };
+    $("#hint").textContent = hints[mode];
+  }
+
+  // ================================================================
+  //  设置更新
+  //  用户在设置面板修改时长后触发
+  //  只在 IDLE 状态时立即应用；运行中则等下次重置/切换再生效
+  // ================================================================
+
+  /**
+   * 更新某项设置
+   * @param {string} key   - "work" | "shortBreak" | "longBreak"
+   * @param {string} value - 输入框的原始值（字符串，需 parseInt）
+   */
+  updateSetting(key, value) {
+    this.settings[key] = parseInt(value) || this.settings[key]; // 解析失败则保持原值
+    this._saveSettings();                              // 立即持久化
+
+    // 只在空闲状态时更新当前倒计时（避免运行中突然改变时间）
+    if (this.state === "idle") {
+      this._setTime();
+      this._render();
+    }
+  }
+
+  // ================================================================
+  //  事件绑定 — 所有用户交互的入口
+  //  包括按钮点击 + 键盘快捷键
+  // ================================================================
+
+  _bindEvents() {
+    // ── 主按钮：开始 / 暂停 / 继续 ──
+    $("#btnMain").addEventListener("click", () => this.toggle());
+
+    // ── 重置按钮 ──
+    $("#btnReset").addEventListener("click", () => {
+      this.reset();
+      playTick();                                      // 点击音效反馈
+    });
+
+    // ── 跳过按钮 ──
+    $("#btnSkip").addEventListener("click", () => {
+      this.skip();
+      playTick();
+    });
+
+    // ── 模式切换按钮：🍅 工作 / ☕ 短休 / 🌴 长休 ──
+    $("#btnWork").addEventListener("click",  () => { this.switchMode("work");         playTick(); });
+    $("#btnShort").addEventListener("click", () => { this.switchMode("short_break");  playTick(); });
+    $("#btnLong").addEventListener("click",  () => { this.switchMode("long_break");   playTick(); });
+
+    // ── 设置面板：齿轮按钮展开/折叠 ──
+    let settingsOpen = false;                          // 用闭包变量追踪面板状态
+    $("#settingsToggle").addEventListener("click", () => {
+      settingsOpen = !settingsOpen;
+      const panel = $("#settingsPanel");
+      const toggle = $("#settingsToggle");
+
+      if (settingsOpen) {
+        // 展开面板
+        panel.classList.add("visible");
+        toggle.classList.add("open");                  // 齿轮旋转 60°
+
+        // 同步输入框的值为当前设置（防止显示过时数据）
+        $("#workMinutes").value = this.settings.work;
+        $("#shortBreakMinutes").value = this.settings.shortBreak;
+        $("#longBreakMinutes").value = this.settings.longBreak;
+      } else {
+        // 折叠面板
+        panel.classList.remove("visible");
+        toggle.classList.remove("open");
+      }
+      playTick();
+    });
+
+    // ── 设置输入框：值变化时保存 ──
+    // 使用 "change" 事件（失焦或回车时触发），而非 "input"（每次按键都触发）
+    $("#workMinutes").addEventListener("change",      (e) => this.updateSetting("work", e.target.value));
+    $("#shortBreakMinutes").addEventListener("change", (e) => this.updateSetting("shortBreak", e.target.value));
+    $("#longBreakMinutes").addEventListener("change",  (e) => this.updateSetting("longBreak", e.target.value));
+
+    // ── 键盘快捷键 ──
+    // 全局监听 keydown，但跳过输入框内按键（防止设置面板误触）
+    document.addEventListener("keydown", (e) => {
+      if (e.target.tagName === "INPUT") return;        // 在输入框中打字时不触发快捷键
+
+      switch (e.code) {
+        case "Space":                                  // 空格键 → 开始/暂停/继续
+          e.preventDefault();                          // 阻止页面滚动
+          this.toggle();
+          break;
+        case "KeyR":                                   // R 键 → 重置
+          e.preventDefault();
+          this.reset();
+          playTick();
+          break;
+        case "ArrowRight":                             // 右箭头 → 跳过
+          e.preventDefault();
+          this.skip();
+          playTick();
+          break;
+        case "Digit1":                                 // 数字 1 → 切换到工作模式
+          this.switchMode("work");
+          playTick();
+          break;
+        case "Digit2":                                 // 数字 2 → 切换到短休息
+          this.switchMode("short_break");
+          playTick();
+          break;
+        case "Digit3":                                 // 数字 3 → 切换到长休息
+          this.switchMode("long_break");
+          playTick();
+          break;
+      }
+    });
+
+    // ── 通知权限：首次点击页面时请求授权 ──
+    // 浏览器要求 Notification.requestPermission() 必须由用户手势触发
+    // 这里在第一次点击时静默请求，之后自动移除监听
+    const requestNotif = () => {
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+      document.removeEventListener("click", requestNotif); // 执行一次后移除
+    };
+    document.addEventListener("click", requestNotif);
+  }
+}
+
+// ====================================================================
+//  应用启动入口
+//  等待 DOM 加载完成后创建 PomodoroApp 实例
+//  并将实例挂载到 window.pomodoro 方便控制台调试
+// ====================================================================
+document.addEventListener("DOMContentLoaded", () => {
+  window.pomodoro = new PomodoroApp();
+
+  // 同步设置面板的输入框初始值
+  $("#workMinutes").value = window.pomodoro.settings.work;
+  $("#shortBreakMinutes").value = window.pomodoro.settings.shortBreak;
+  $("#longBreakMinutes").value = window.pomodoro.settings.longBreak;
+});
+</script>
+
+</body>
+</html>
